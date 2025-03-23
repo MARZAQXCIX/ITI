@@ -1,7 +1,7 @@
 # ITI
 Contact : +212649931406 | mzq305@gmail.com
 Shiny for International Trade Intelligence Dashboard
-GitHub Repository Description for Your Shiny App
+GitHub Repository Description for Shiny App
 International Trade Intelligence Dashboard
 
 This repository contains a Shiny application built in R for visualizing and analyzing international trade data. 
