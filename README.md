@@ -4,7 +4,9 @@ Shiny for International Trade Intelligence Dashboard
 GitHub Repository Description for Your Shiny App
 International Trade Intelligence Dashboard
 
-This repository contains a Shiny application built in R for visualizing and analyzing international trade data. The dashboard provides an interactive interface to explore trade values and growth rates for exports and imports, with a focus on specific commodities identified by their HS (Harmonized System) codes. It features a clean and user-friendly design, making it easy to search for products, view trade trends over time, and analyze growth metrics.
+This repository contains a Shiny application built in R for visualizing and analyzing international trade data. 
+The dashboard provides an interactive interface to explore trade values and growth rates for exports and imports, with a focus on specific commodities identified by their HS (Harmonized System) codes. 
+It features a clean and user-friendly design, making it easy to search for products, view trade trends over time, and analyze growth metrics.
 
 Key Features:
 Interactive Dashboard: Built using R Shiny, allowing users to select between exports and imports and search for products by HS code or description.
