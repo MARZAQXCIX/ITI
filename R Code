@@ -1,0 +1,242 @@
+# Load required libraries
+library(readxl)
+library(tidyverse)
+library(rio)
+library(dplyr)
+library(comtradr)
+library(shiny)
+library(DT)
+library(plotly)
+
+# Set the Comtrade API key for the session
+Sys.setenv('COMTRADE_PRIMARY' = '1d92320d35c849829994ef1b6bc27f58')
+
+# Import data
+trade_data <- import("C:/Users/pc/Desktop/US_MA.xlsx")
+
+# --- Get Commodity Descriptions ---
+unique_cmdcodes <- unique(trade_data$cmdcode_6)
+hs_table <- ct_get_ref_table(dataset_id = "HS", update = TRUE)
+print(colnames(hs_table))  # For debugging, remove after confirming
+
+commodity_descriptions <- hs_table %>%
+  filter(id %in% unique_cmdcodes) %>%
+  select(id, text) %>%
+  distinct() %>%
+  rename(cmdcode_6 = id, Description = text)
+
+# --- Exports Processing ---
+Exports <- trade_data %>%
+  filter(flowcategory == "Exports")
+
+Exports_summary <- Exports %>%
+  group_by(Year, cmdcode_6) %>%
+  summarize(total_value_usd = sum(value_usd, na.rm = TRUE)) %>%
+  ungroup()
+
+Exports_table <- Exports_summary %>%
+  pivot_wider(names_from = Year, 
+              values_from = total_value_usd, 
+              values_fill = 0)
+
+# Calculate Growth Rates for each year and CAGR
+Exports_table <- Exports_table %>%
+  mutate(
+    across(c(`2017`:`2024`), as.numeric),
+    Growth_2018 = round(((`2018` / `2017`) - 1) * 100, 2),
+    Growth_2019 = round(((`2019` / `2018`) - 1) * 100, 2),
+    Growth_2020 = round(((`2020` / `2019`) - 1) * 100, 2),
+    Growth_2021 = round(((`2021` / `2020`) - 1) * 100, 2),
+    Growth_2022 = round(((`2022` / `2021`) - 1) * 100, 2),
+    Growth_2023 = round(((`2023` / `2022`) - 1) * 100, 2),
+    Growth_2024 = round(((`2024` / `2023`) - 1) * 100, 2),
+    CAGR_2017_2024 = round(((`2024` / `2017`)^(1/7) - 1) * 100, 2)
+  ) %>%
+  mutate(
+    across(starts_with("Growth_"), ~ifelse(is.nan(.) | is.infinite(.), NA, .)),
+    CAGR_2017_2024 = ifelse(`2017` == 0 & `2024` > 0, Inf, 
+                            ifelse(`2017` == 0 & `2024` == 0, NA, CAGR_2017_2024))
+  ) %>%
+  left_join(commodity_descriptions, by = "cmdcode_6")
+
+# --- Imports Processing ---
+Imports <- trade_data %>%
+  filter(flowcategory == "Imports")
+
+Imports_summary <- Imports %>%
+  group_by(Year, cmdcode_6) %>%
+  summarize(total_value_usd = sum(value_usd, na.rm = TRUE)) %>%
+  ungroup()
+
+Imports_table <- Imports_summary %>%
+  pivot_wider(names_from = Year, 
+              values_from = total_value_usd, 
+              values_fill = 0)
+
+# Calculate Growth Rates for each year and CAGR
+Imports_table <- Imports_table %>%
+  mutate(
+    across(c(`2017`:`2024`), as.numeric),
+    Growth_2018 = round(((`2018` / `2017`) - 1) * 100, 2),
+    Growth_2019 = round(((`2019` / `2018`) - 1) * 100, 2),
+    Growth_2020 = round(((`2020` / `2019`) - 1) * 100, 2),
+    Growth_2021 = round(((`2021` / `2020`) - 1) * 100, 2),
+    Growth_2022 = round(((`2022` / `2021`) - 1) * 100, 2),
+    Growth_2023 = round(((`2023` / `2022`) - 1) * 100, 2),
+    Growth_2024 = round(((`2024` / `2023`) - 1) * 100, 2),
+    CAGR_2017_2024 = round(((`2024` / `2017`)^(1/7) - 1) * 100, 2)
+  ) %>%
+  mutate(
+    across(starts_with("Growth_"), ~ifelse(is.nan(.) | is.infinite(.), NA, .)),
+    CAGR_2017_2024 = ifelse(`2017` == 0 & `2024` > 0, Inf, 
+                            ifelse(`2017` == 0 & `2024` == 0, NA, CAGR_2017_2024))
+  ) %>%
+  left_join(commodity_descriptions, by = "cmdcode_6")
+
+# --- Shiny App ---
+load_data <- function() {
+  return(list(Exports = Exports_table, Imports = Imports_table))
+}
+
+data <- load_data()
+
+ui <- fluidPage(
+  theme = bslib::bs_theme(bootswatch = "flatly"),
+  # Add custom CSS for the title font
+  tags$head(
+    tags$link(href = "https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap", rel = "stylesheet"),
+    tags$style(HTML("
+      .title-panel {
+        font-family: 'Roboto Condensed', sans-serif;
+        font-weight: 700;
+        font-size: 28px;
+      }
+    "))
+  ),
+  # Use div with h1 to apply the custom class
+  div(class = "title-panel", h1("International Trade Intelligence")),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      selectInput("flow", "Select Flow Category:", choices = c("Exports", "Imports")),
+      selectizeInput("search", "Search Product (by SH Code or Description):", choices = NULL, multiple = FALSE, 
+                     options = list(create = FALSE, placeholder = "Type to search...")),
+      actionButton("search_btn", "Search", class = "btn-primary"),
+      div(style = "margin-top: 20px;"),
+      h4("Growth Metrics"),
+      verbatimTextOutput("cagr_info"),
+      DTOutput("growth_rates_table", height = "200px")
+    ),
+    mainPanel(
+      width = 9,
+      DTOutput("results"),
+      div(style = "margin-top: 20px;"),
+      plotlyOutput("trade_plot", height = "300px")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Update search input with both cmdcode_6 and Description
+  observe({
+    combined_choices <- unique(c(data$Exports$cmdcode_6, data$Imports$cmdcode_6, 
+                                 data$Exports$Description, data$Imports$Description))
+    updateSelectizeInput(session, "search", choices = combined_choices, server = TRUE)
+  })
+  
+  # Filter data based on search input
+  filtered_data <- eventReactive(input$search_btn, {
+    req(input$search)
+    df <- if (input$flow == "Exports") data$Exports else data$Imports
+    
+    filtered_df <- df %>%
+      filter(cmdcode_6 == input$search | Description == input$search) %>%
+      select(cmdcode_6, `2017`:`2024`, starts_with("Growth_"), CAGR_2017_2024) %>%
+      pivot_longer(cols = -cmdcode_6, names_to = "Metric", values_to = "Value") %>%
+      mutate(Type = case_when(
+        Metric %in% c("2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024") ~ "Value",
+        Metric %in% c("Growth_2018", "Growth_2019", "Growth_2020", "Growth_2021", 
+                      "Growth_2022", "Growth_2023", "Growth_2024") ~ "Growth",
+        Metric == "CAGR_2017_2024" ~ "CAGR"
+      ))
+    
+    return(filtered_df)
+  })
+  
+  # Table output (transposed: years as rows, rename value column to "Value$")
+  output$results <- renderDT({
+    table_data <- filtered_data() %>%
+      filter(Type == "Value") %>%
+      select(-Type) %>%
+      pivot_wider(names_from = cmdcode_6, values_from = Value) %>%
+      rename(Year = Metric, "Value$" = 2) %>%
+      mutate("Value$" = format(round(`Value$`, 0), big.mark = " ", scientific = FALSE, trim = TRUE))
+    
+    datatable(table_data,
+              options = list(pageLength = 8, dom = 't', ordering = FALSE),
+              rownames = FALSE)
+  })
+  
+  # Growth Rates Table in Sidebar
+  output$growth_rates_table <- renderDT({
+    growth_data <- filtered_data() %>%
+      filter(Type == "Growth") %>%
+      select(-Type, -cmdcode_6) %>%
+      mutate(Metric = str_replace(Metric, "Growth_", "Growth Rate ")) %>%
+      rename(Year = Metric, "Growth Rate (%)" = Value) %>%
+      mutate("Growth Rate (%)" = ifelse(is.na(`Growth Rate (%)`), "NA",
+                                        sprintf("%.2f", `Growth Rate (%)`)))
+    
+    datatable(growth_data,
+              options = list(pageLength = 7, dom = 't', ordering = FALSE),
+              rownames = FALSE)
+  })
+  
+  # Plotly chart (stacked bars for values, smoothed line for growth rates, legend below)
+  output$trade_plot <- renderPlotly({
+    plot_data <- filtered_data() %>%
+      filter(Type %in% c("Value", "Growth")) %>%
+      mutate(Year = case_when(
+        Type == "Value" ~ as.numeric(Metric),
+        Type == "Growth" ~ as.numeric(str_extract(Metric, "\\d{4}"))
+      ))
+    
+    values_data <- plot_data %>% filter(Type == "Value")
+    growth_data <- plot_data %>% filter(Type == "Growth")
+    
+    p <- plot_ly() %>%
+      add_bars(data = values_data, x = ~Year, y = ~Value, name = "Trade Value (USD)",
+               marker = list(color = "rgba(55, 128, 191, 0.7)"),
+               text = ~format(round(Value, 0), big.mark = " "), textposition = "none") %>%
+      add_lines(data = growth_data, x = ~Year, y = ~Value, name = "Growth Rate (%)",
+                yaxis = "y2", line = list(color = "red", width = 2, shape = "spline")) %>%
+      layout(
+        title = list(text = paste("Trade Values and Growth Rates for", input$search, "(", input$flow, ")"),
+                     x = 0.5, xanchor = "center"),
+        xaxis = list(title = ""),
+        yaxis = list(title = "Trade Value (USD)"),
+        yaxis2 = list(title = "Growth Rate (%)", overlaying = "y", side = "right"),
+        barmode = "stack",
+        legend = list(
+          x = 0.5,  # Center the legend horizontally
+          y = -0.2,  # Position below the chart
+          xanchor = "center",
+          yanchor = "top",
+          orientation = "h"  # Horizontal legend
+        ),
+        margin = list(t = 50, b = 50, l = 50, r = 5)  # Increase bottom margin to accommodate legend
+      )
+    
+    p
+  })
+  
+  # CAGR info in Sidebar
+  output$cagr_info <- renderText({
+    data <- filtered_data()
+    cagr <- data %>% filter(Metric == "CAGR_2017_2024") %>% pull(Value)
+    paste("CAGR (2017-2024):", sprintf("%.2f", cagr), "%")
+  })
+}
+
+shinyApp(ui = ui, server = server)
